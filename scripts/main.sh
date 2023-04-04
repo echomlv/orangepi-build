@@ -10,6 +10,7 @@
 # Main program
 #
 
+# 判断是否是通过build.sh执行本脚本的
 if [[ $(basename "$0") == main.sh ]]; then
 
 	echo "Please use build.sh to start the build process"
@@ -35,7 +36,7 @@ if [[ $BUILD_ALL != "yes" ]]; then
 fi
 
 # We'll use this title on all menus
-backtitle="Orange Pi building script, http://www.orangepi.org" 
+backtitle="Orange Pi building script, http://www.orangepi.org"
 titlestr="Choose an option"
 
 # if language not set, set to english
@@ -46,7 +47,7 @@ titlestr="Choose an option"
 
 [[ -z $FORCE_CHECKOUT ]] && FORCE_CHECKOUT=yes
 
-# Load libraries
+# Load libraries  加载一些shell函数，用于后续处理
 # shellcheck source=debootstrap.sh
 source "${SRC}"/scripts/debootstrap.sh	# system specific install
 # shellcheck source=image-helpers.sh
@@ -68,7 +69,7 @@ source "${SRC}"/scripts/chroot-buildpackages.sh	# building packages in chroot
 # shellcheck source=pack.sh
 source "${SRC}"/scripts/pack-uboot.sh
 
-# compress and remove old logs
+# compress and remove old logs 压缩&移除历史日志
 mkdir -p "${DEST}"/debug
 (cd "${DEST}"/debug && tar -czf logs-"$(<timestamp)".tgz ./*.log) > /dev/null 2>&1
 rm -f "${DEST}"/debug/*.log > /dev/null 2>&1
@@ -116,7 +117,9 @@ else
 fi
 
 # if BUILD_OPT, KERNEL_CONFIGURE, BOARD, BRANCH or RELEASE are not set, display selection menu
+# 判断编译&内核&板子&架构等参数是否设置,没有则显示图形界面; (使用shell命令whiptail来实现菜单显示)
 
+# 编译类型: u-boot, kernel, rootfs, or image
 if [[ -z $BUILD_OPT ]]; then
 
 	options+=("u-boot"	 "U-boot package")
@@ -128,12 +131,13 @@ if [[ -z $BUILD_OPT ]]; then
 	BUILD_OPT=$(whiptail --title "${titlestr}" --backtitle "${backtitle}" --notags \
 			  --menu "${menustr}" "${TTY_Y}" "${TTY_X}" $((TTY_Y - 8))  \
 			  --cancel-button Exit --ok-button Select "${options[@]}" \
-			  3>&1 1>&2 2>&3)
+			  3>&1 1>&2 2>&3)	#3>&1 1>&2 2>&3 作用是将标准输出流和标准错误流交换，以便在脚本中可以轻松地捕获用户的输入
 
 	unset options
 	[[ -z $BUILD_OPT ]] && exit_with_error "No option selected"
 fi
 
+# 板子类型
 if [[ -z $BOARD ]]; then
 
 	options+=("orangepir1"			"Allwinner H2+ quad core 256MB RAM WiFi SPI 2xETH")
@@ -172,13 +176,17 @@ if [[ -z $BOARD ]]; then
 	[[ -z $BOARD ]] && exit_with_error "No option selected"
 fi
 
+# 加载板子配置
 BOARD_TYPE="conf"
 # shellcheck source=/dev/null
 source "${EXTER}/config/boards/${BOARD}.${BOARD_TYPE}"
 LINUXFAMILY="${BOARDFAMILY}"
+display_alert "---board info:" "board=$BOARD, family=${BOARDFAMILY}, conf=${EXTER}/config/boards/${BOARD}.${BOARD_TYPE}" "info"
+
 
 [[ -z $KERNEL_TARGET ]] && exit_with_error "Board configuration does not define valid kernel config"
 
+# 内核分支
 if [[ -z $BRANCH ]]; then
 
     options=()
@@ -206,6 +214,7 @@ else
 
 fi
 
+# 如果是全部编译或者编译kernel,配置菜单
 if [[ ${BUILD_OPT} == image || ${BUILD_OPT} == kernel ]]; then
 
 	if [[ -z $KERNEL_CONFIGURE ]]; then
@@ -225,7 +234,7 @@ if [[ ${BUILD_OPT} == image || ${BUILD_OPT} == kernel ]]; then
 fi
 
 # define distribution support status
-declare -A distro_name
+declare -A distro_name		#声明了一个关联数组
 distro_name['stretch']="Debian 9 Stretch"
 distro_name['buster']="Debian 10 Buster"
 distro_name['bullseye']="Debian 11 Bullseye"
@@ -234,6 +243,7 @@ distro_name['bionic']="Ubuntu Bionic 18.04 LTS"
 distro_name['focal']="Ubuntu Focal 20.04 LTS"
 distro_name['eoan']="Ubuntu Eoan 19.10"
 
+# 如果是全部编译或者编译rootfs,配置菜单
 if [[ ${BUILD_OPT} == image || ${BUILD_OPT} == rootfs ]]; then
 
 	RELEASE_TARGET="stretch buster bullseye xenial bionic eoan focal"
@@ -241,9 +251,9 @@ if [[ ${BUILD_OPT} == image || ${BUILD_OPT} == rootfs ]]; then
 	if [[ -z $RELEASE ]]; then
 
 		if [[ $BRANCH == legacy ]]; then
-		
+
 			if [[ $LINUXFAMILY == sun50iw9 || $LINUXFAMILY == sun50iw6 ]]; then
-		
+
 				RELEASE_TARGET="buster bionic focal"
 			elif [[ $LINUXFAMILY == rk3399 ]]; then
 
@@ -299,10 +309,10 @@ if [[ ${BUILD_OPT} == image || ${BUILD_OPT} == rootfs ]]; then
 	fi
 
 	if [[ $BUILD_DESKTOP == "no" && -z $BUILD_MINIMAL ]]; then
-	
+
 	    options+=("no" "Standard image with console interface")
 	    options+=("yes" "Minimal image with console interface")
-		
+
 		menustr="Select the target image type."
 	    BUILD_MINIMAL=$(whiptail --title "${titlestr}" --backtitle "${backtitle}" --notags \
 				  --menu "${menustr}" "${TTY_Y}" "${TTY_X}" $((TTY_Y - 8))  \
@@ -324,9 +334,11 @@ CONTAINER_COMPAT="no"
 [[ -z $COMPRESS_OUTPUTIMAGE ]] && COMPRESS_OUTPUTIMAGE="yes"
 
 #shellcheck source=configuration.sh
+
+# 加载配置脚本
 source "${SRC}"/scripts/configuration.sh
 
-# optimize build time with 100% CPU usage
+# optimize build time with 100% CPU usage 多线程编译配置
 CPUS=$(grep -c 'processor' /proc/cpuinfo)
 if [[ $USEALLCORES != no ]]; then
 
@@ -344,6 +356,7 @@ else
     IMAGE_TYPE=user-built
 fi
 
+# 源码路径
 branch2dir() {
 	[[ "${1}" == "head" ]] && echo "HEAD" || echo "${1##*:}"
 }
@@ -372,6 +385,7 @@ start=$(date +%s)
 
 # Check and install dependencies, directory structure and settings
 # The OFFLINE_WORK variable inside the function
+# 检查依赖关系
 prepare_host
 
 [[ $CLEAN_LEVEL == *sources* ]] && cleaning "sources"
@@ -387,7 +401,7 @@ display_alert "Downloading sources" "" "info"
 	if [[ -n $ATFSOURCE ]]; then
 		fetch_from_repo "$ATFSOURCE" "${EXTER}/cache/sources/$ATFDIR" "$ATFBRANCH" "yes"
 	fi
-	
+
 	fetch_from_repo "https://github.com/linux-sunxi/sunxi-tools" "${EXTER}/cache/sources/sunxi-tools" "branch:master"
 	fetch_from_repo "https://github.com/armbian/rkbin" "${EXTER}/cache/sources/rkbin-tools" "branch:master"
 
@@ -404,12 +418,13 @@ for option in $(tr ',' ' ' <<< "$CLEAN_LEVEL"); do
 done
 
 # Compile u-boot if packed .deb does not exist or use the one from Orange Pi
+# 编译u-boot, 如果.deb不存在则重新编译
 if [[ $BUILD_OPT == u-boot || $BUILD_OPT == image ]]; then
 
 	if [[ ! -f "${DEB_STORAGE}"/u-boot/${CHOSEN_UBOOT}_${REVISION}_${ARCH}.deb ]]; then
 
 		[[ -n "${ATFSOURCE}" && "${REPOSITORY_INSTALL}" != *u-boot* ]] && compile_atf
-		
+
 		[[ ${REPOSITORY_INSTALL} != *u-boot* ]] && compile_uboot
 	fi
 
@@ -423,7 +438,7 @@ fi
 # Compile kernel if packed .deb does not exist or use the one from Orange Pi
 if [[ $BUILD_OPT == kernel || $BUILD_OPT == image ]]; then
 
-	if [[ ! -f ${DEB_STORAGE}/${CHOSEN_KERNEL}_${REVISION}_${ARCH}.deb ]]; then 
+	if [[ ! -f ${DEB_STORAGE}/${CHOSEN_KERNEL}_${REVISION}_${ARCH}.deb ]]; then
 
 		[[ "${REPOSITORY_INSTALL}" != *kernel* ]] && compile_kernel
 	fi
@@ -439,32 +454,32 @@ if [[ $BUILD_OPT == rootfs || $BUILD_OPT == image ]]; then
 
 	# Compile orangepi-config if packed .deb does not exist or use the one from Orange Pi
 	if [[ ! -f ${DEB_STORAGE}/orangepi-config_${REVISION}_all.deb ]]; then
-	
+
 		[[ "${REPOSITORY_INSTALL}" != *orangepi-config* ]] && compile_orangepi-config
-	fi 
-	
-	if [[ ! -f ${DEB_STORAGE}/orangepi-firmware_${REVISION}_all.deb ]]; then 
-	
+	fi
+
+	if [[ ! -f ${DEB_STORAGE}/orangepi-firmware_${REVISION}_all.deb ]]; then
+
 		[[ "${REPOSITORY_INSTALL}" != *orangepi-firmware* ]] && compile_firmware
 	fi
-	
+
 	overlayfs_wrapper "cleanup"
-	
+
 	# create board support package
-	if [[ ! -f ${DEB_STORAGE}/$RELEASE/${CHOSEN_ROOTFS}_${REVISION}_${ARCH}.deb ]]; then 
-	
+	if [[ ! -f ${DEB_STORAGE}/$RELEASE/${CHOSEN_ROOTFS}_${REVISION}_${ARCH}.deb ]]; then
+
 		[[ "${REPOSITORY_INSTALL}" != *bsp* ]] && create_board_package
 	fi
-	
+
 	# create desktop package
 	if [[ ! -f ${DEB_STORAGE}/$RELEASE/${CHOSEN_DESKTOP}_${REVISION}_all.deb ]]; then
-	
+
 		[[ "${REPOSITORY_INSTALL}" != *orangepi-desktop* ]] && create_desktop_package
 	fi
-	
+
 	# build additional packages
 	[[ $EXTERNAL_NEW == compile ]] && chroot_build_packages
-	
+
 	[[ $BSP_BUILD != yes ]] && debootstrap_ng
 
 fi

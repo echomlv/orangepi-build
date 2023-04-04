@@ -105,6 +105,7 @@ compile_atf()
 compile_uboot()
 {
 	# not optimal, but extra cleaning before overlayfs_wrapper should keep sources directory clean
+	# 清理
 	if [[ $CLEAN_LEVEL == *make* ]]; then
 		display_alert "Cleaning" "$BOOTSOURCEDIR" "info"
 		(cd $BOOTSOURCEDIR; make clean > /dev/null 2>&1)
@@ -116,6 +117,7 @@ compile_uboot()
 	else
 		local ubootdir="$BOOTSOURCEDIR"
 	fi
+	# 跳转到uboot源码目录
 	cd "${ubootdir}" || exit
 
 	# read uboot version
@@ -125,11 +127,12 @@ compile_uboot()
 
 	display_alert "Compiling u-boot" "v$version" "info"
 
+	# 指定交叉工具链
 	local toolchain
 	toolchain=$(find_toolchain "$UBOOT_COMPILER" "$UBOOT_USE_GCC")
 	[[ -z $toolchain ]] && exit_with_error "Could not find required toolchain" "${UBOOT_COMPILER}gcc $UBOOT_USE_GCC"
 
-	if [[ -n $UBOOT_TOOLCHAIN2 ]]; then
+	if [[ -n $UBOOT_TOOLCHAIN2 ]]; then		#额外的工具链? 未使用
 		local toolchain2_type toolchain2_ver toolchain2
 		toolchain2_type=$(cut -d':' -f1 <<< "${UBOOT_TOOLCHAIN2}")
 		toolchain2_ver=$(cut -d':' -f2 <<< "${UBOOT_TOOLCHAIN2}")
@@ -140,12 +143,18 @@ compile_uboot()
 	display_alert "Compiler version" "${UBOOT_COMPILER}gcc $(eval env PATH="${toolchain}:${toolchain2}:${PATH}" "${UBOOT_COMPILER}gcc" -dumpversion)" "info"
 	[[ -n $toolchain2 ]] && display_alert "Additional compiler version" "${toolchain2_type}gcc $(eval env PATH="${toolchain}:${toolchain2}:${PATH}" "${toolchain2_type}gcc" -dumpversion)" "info"
 
-	# create directory structure for the .deb package
+	# create directory structure for the .deb package  创建相关目录用于保存.deb
 	local uboot_name=${CHOSEN_UBOOT}_${REVISION}_${ARCH}
 	rm -rf $SRC/.tmp/{$uboot_name,packout}
 	mkdir -p $SRC/.tmp/$uboot_name/usr/lib/{u-boot,$uboot_name} $SRC/.tmp/$uboot_name/DEBIAN $SRC/.tmp/packout
 
-	# process compilation for one or multiple targets
+	# process compilation for one or multiple targets 从$UBOOT_TARGET_MAP中循环读取，赋值给target
+	# 配置文件来源如下:
+	# source "${SRC}"/scripts/configuration.sh    #main.sh
+	#		source "${EXTER}/config/sources/families/${LINUXFAMILY}.conf"  #例如LINUXFAMILY = sun8i
+	#			source "${BASH_SOURCE%/*}/include/sunxi_common.inc"
+	#				UBOOT_TARGET_MAP=';;u-boot-sunxi-with-spl.bin'
+
 	while read -r target; do
 		local target_make target_patchdir target_files
 		target_make=$(cut -d';' -f1 <<< "${target}")
@@ -157,9 +166,11 @@ compile_uboot()
 			(cd "$BOOTSOURCEDIR"; make clean > /dev/null 2>&1)
 		fi
 
+		# 为uboot源码打补丁
+		# $BOOTPATCHDIR	==>"${BASH_SOURCE%/*}/include/sunxi_common.inc"中定义
 		advanced_patch "u-boot" "$BOOTPATCHDIR" "$BOARD" "$target_patchdir" "$BRANCH" "${LINUXFAMILY}-${BOARD}-${BRANCH}"
 
-		# create patch for manual source changes
+		# create patch for manual source changes 根据配置：源码修改了是否创建补丁
 		[[ $CREATE_PATCHES == yes ]] && userpatch_create "u-boot"
 
 		if [[ -n $ATFSOURCE ]]; then
@@ -168,6 +179,9 @@ compile_uboot()
 		fi
 
 		echo -e "\n\t== u-boot ==\n" >> "${DEST}"/debug/compilation.log
+
+		# eval用法：eval command-line, 其结果是shell在执行命令行之前扫描它两次
+		# make orangepi_plus2e_defconfig 配置
 		eval CCACHE_BASEDIR="$(pwd)" env PATH="${toolchain}:${toolchain2}:${PATH}" \
 			'make $CTHREADS $BOOTCONFIG \
 			CROSS_COMPILE="$CCACHE $UBOOT_COMPILER"' 2>> "${DEST}"/debug/compilation.log \
@@ -207,6 +221,7 @@ compile_uboot()
 		cross_compile="CROSS_COMPILE=$CCACHE $UBOOT_COMPILER";
 		[[ -n $UBOOT_TOOLCHAIN2 ]] && cross_compile="ORANGEPI=foe"; # empty parameter is not allowed
 
+		# 编译
 		eval CCACHE_BASEDIR="$(pwd)" env PATH="${toolchain}:${toolchain2}:${PATH}" \
 			'make $target_make $CTHREADS \
 			"${cross_compile}"' 2>>"${DEST}"/debug/compilation.log \
@@ -238,6 +253,7 @@ compile_uboot()
 		done
 	done <<< "$UBOOT_TARGET_MAP"
 
+	# 打包uboot成deb
 	if [[ $PACK_UBOOT == "yes" ]];then
 		if [[ $BOARDFAMILY =~ sun50iw1 ]]; then
 			if [[ $(type -t u-boot_tweaks) == function ]]; then
@@ -506,7 +522,7 @@ compile_firmware()
                 # cp : create hardlinks
                 #cp -alf "${EXTER}"/cache/sources/linux-firmware-git/* "${EXTER}/cache/sources/${plugin_dir}/lib/firmware/"
         fi
-	
+
         # overlay our firmware
         # cp : create hardlinks
         if [[ -n $FULL ]]; then
@@ -714,6 +730,8 @@ advanced_patch()
 		)
 	local links=()
 
+	#echo $dirs
+
 	# required for "for" command
 	shopt -s nullglob dotglob
 	# get patch file names
@@ -732,11 +750,13 @@ advanced_patch()
 	names=("${names[@]}" "${links[@]}")
 	# remove duplicates
 	local names_s=($(echo "${names[@]}" | tr ' ' '\n' | LC_ALL=C sort -u | tr '\n' ' '))
+
 	# apply patches
 	for name in "${names_s[@]}"; do
 		for dir in "${dirs[@]}"; do
 			if [[ -f ${dir%%:*}/$name ]]; then
 				if [[ -s ${dir%%:*}/$name ]]; then
+					# echo "Will patch: ${dir%%:*}/$name"
 					process_patch_file "${dir%%:*}/$name" "${dir##*:}"
 				else
 					display_alert "* ${dir##*:} $name" "skipped"
@@ -869,7 +889,7 @@ overlayfs_wrapper()
                 [[ $dir == /tmp/* ]] && umount -l "$dir" > /dev/null 2>&1
             done
         fi
-		
+
         if [[ -f /tmp/.overlayfs_wrapper_cleanup ]]; then
             for dir in $(</tmp/.overlayfs_wrapper_cleanup); do
                 [[ $dir == /tmp/* ]] && rm -rf "$dir"

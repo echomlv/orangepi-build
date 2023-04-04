@@ -10,13 +10,16 @@
 # use configuration files like config-default.conf to set the build configuration
 # check Orange Pi documentation for more info
 
+# 获取当前sh的路径
 SRC="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 # check for whitespace in $SRC and exit for safety reasons
+# 判断路径中是否有空格，不允许有空格
 grep -q "[[:space:]]" <<<"${SRC}" && { echo "\"${SRC}\" contains whitespace. Not supported. Aborting." >&2 ; exit 1 ; }
 
 cd "${SRC}" || exit
 
+# 判断general.sh脚本是否存在
 if [[ -f "${SRC}"/scripts/general.sh ]]; then
 	# shellcheck source=scripts/general.sh
 	source "${SRC}"/scripts/general.sh
@@ -26,6 +29,7 @@ else
 	exit 255
 fi
 
+# 判断是否有root权限
 if [[ $EUID == 0 ]] || [[ "$1" == vagrant ]]; then
 	:
 elif [[ "$1" == docker || "$1" == dockerpurge || "$1" == docker-shell ]] && grep -q `whoami` <(getent group docker); then
@@ -82,6 +86,7 @@ update_src() {
 #rm $TMPFILE
 
 # Check for required packages for compiling
+# 检查安装一些依赖
 if [[ -z "$(which whiptail)" ]]; then
 	sudo apt-get update
 	sudo apt-get install -y whiptail
@@ -147,6 +152,7 @@ EXTER="${SRC}/external"
 mkdir -p $SRC/userpatches
 
 # Create example configs if none found in userpatches
+# 如果没有配置文件，创建默认配置
 if ! ls ${SRC}/userpatches/{config-example.conf,config-docker.conf,config-vagrant.conf} 1> /dev/null 2>&1; then
 
 	display_alert "Create example config file using template" "config-default.conf" "info"
@@ -189,7 +195,7 @@ if [[ -z "$CONFIG" && -f "${SRC}/userpatches/config-default.conf" ]]; then
 	CONFIG="$SRC/userpatches/config-default.conf"
 fi
 
-# source build configuration file
+# source build configuration file  配置文件加载
 CONFIG_FILE="$(realpath "$CONFIG")"
 
 if [[ ! -f $CONFIG_FILE ]]; then
@@ -207,13 +213,13 @@ popd > /dev/null
 
 [[ -z "${USERPATCHES_PATH}" ]] && USERPATCHES_PATH="$CONFIG_PATH"
 
-# Script parameters handling
-while [[ $1 == *=* ]]; do
-    parameter=${1%%=*}
-    value=${1##*=}
-    shift
+# Script parameters handling 命令函参数处理
+while [[ $1 == *=* ]]; do		#检查$1中是否包含=
+    parameter=${1%%=*}	#${1%%=*} 是 Bash 中的一种字符串操作，用于从字符串的开头删除最长匹配的子字符串。它用于删除 $1 中等号（=）及其后面的部分，从而得到参数的名称
+    value=${1##*=} #${1##*=} 是 Bash 中的另一种字符串操作，用于从字符串的结尾删除最长匹配的子字符串。它用于删除 $1 中等号（=）及其前面的部分，从而得到参数的值。
+    shift	#命令用于将命令行参数向左移动一个位置，即将 $2 赋值给 $1，将 $3 赋值给 $2，以此类推。
     display_alert "Command line: setting $parameter to" "${value:-(empty)}" "info"
-    eval "$parameter=\"$value\""
+    eval "$parameter=\"$value\"" #eval用于将参数作为命令执行.这里用于配置参数的值
 done
 
 if [[ $BUILD_ALL == yes || $BUILD_ALL == demo ]]; then
